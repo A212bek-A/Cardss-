@@ -15,10 +15,22 @@ jobs:
         with:
           node-version: 20
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: Prepare files
+        run: |
+          mkdir -p www assets
+          [ -f index.html ] && cp index.html www/index.html || true
+          [ -f icon.png ] && cp icon.png assets/icon.png || true
+          ls -R www assets
 
       - name: Install dependencies
         run: npm install
@@ -28,11 +40,12 @@ jobs:
 
       - name: Set app icon
         run: |
+          IM=$(command -v magick || command -v convert)
           RES=android/app/src/main/res
           rm -rf $RES/mipmap-anydpi-v26
           for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             d=${pair%%:*}; s=${pair##*:}
-            convert assets/icon.png -resize ${s}x${s} $RES/mipmap-$d/ic_launcher.png
+            $IM assets/icon.png -resize ${s}x${s} $RES/mipmap-$d/ic_launcher.png
             cp $RES/mipmap-$d/ic_launcher.png $RES/mipmap-$d/ic_launcher_round.png
             cp $RES/mipmap-$d/ic_launcher.png $RES/mipmap-$d/ic_launcher_foreground.png
           done
@@ -40,7 +53,7 @@ jobs:
       - name: Add notification permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n <application#' "$MANIFEST"
+          sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application#' "$MANIFEST"
           grep -n "uses-permission" "$MANIFEST"
 
       - name: Sync web files
