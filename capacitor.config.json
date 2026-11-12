@@ -1,0 +1,6 @@
+{
+  "appId": "com.kartochki.app",
+  "appName": "Карточки",
+  "webDir": "www",
+  "android": { "backgroundColor": "#0e1226" }
+}
