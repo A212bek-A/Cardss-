@@ -33,7 +33,10 @@ jobs:
           ls icon-*.png
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          MAJOR=$(node -p "require('@capacitor/core/package.json').version.split('.')[0]")
+          npm install @capacitor/app@$MAJOR || true
 
       - name: Add Android platform
         run: npx cap add android
@@ -56,7 +59,7 @@ jobs:
       - name: Add notification permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application#' "$MANIFEST"
+          sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n <application#' "$MANIFEST"
           grep -n "uses-permission" "$MANIFEST"
 
       - name: Add switchable app icons
@@ -71,19 +74,19 @@ jobs:
           for k in ['violet', 'forest', 'rose', 'ocean', 'sunset', 'mono']:
               en = 'true' if k == 'violet' else 'false'
               al += (
-                  '\n        <activity-alias android:name=".Icon_' + k + '"'
+                  '\n <activity-alias android:name=".Icon_' + k + '"'
                   ' android:targetActivity=".MainActivity"'
                   ' android:enabled="' + en + '" android:exported="true"'
                   ' android:icon="@mipmap/ic_' + k + '"'
                   ' android:roundIcon="@mipmap/ic_' + k + '"'
                   ' android:label="@string/app_name">\n'
-                  '            <intent-filter>\n'
-                  '                <action android:name="android.intent.action.MAIN" />\n'
-                  '                <category android:name="android.intent.category.LAUNCHER" />\n'
-                  '            </intent-filter>\n'
-                  '        </activity-alias>')
+                  ' <intent-filter>\n'
+                  ' <action android:name="android.intent.action.MAIN" />\n'
+                  ' <category android:name="android.intent.category.LAUNCHER" />\n'
+                  ' </intent-filter>\n'
+                  ' </activity-alias>')
           assert s.count('</application>') == 1
-          s = s.replace('</application>', al + '\n    </application>')
+          s = s.replace('</application>', al + '\n </application>')
           open(p, 'w', encoding='utf-8').write(s)
           PY
           D=android/app/src/main/java/com/kartochki/app
