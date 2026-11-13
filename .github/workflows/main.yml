@@ -15,10 +15,22 @@ jobs:
         with:
           node-version: 20
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: Prepare files
+        run: |
+          mkdir -p www
+          [ -f index.html ] && cp index.html www/index.html || true
+          ls -R www
+          ls icon-*.png
 
       - name: Install dependencies
         run: npm install
@@ -26,22 +38,105 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Set app icon
+      - name: Set app icons
         run: |
+          IM=$(command -v magick || command -v convert)
           RES=android/app/src/main/res
           rm -rf $RES/mipmap-anydpi-v26
           for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             d=${pair%%:*}; s=${pair##*:}
-            convert assets/icon.png -resize ${s}x${s} $RES/mipmap-$d/ic_launcher.png
+            $IM icon-violet.png -resize ${s}x${s} $RES/mipmap-$d/ic_launcher.png
             cp $RES/mipmap-$d/ic_launcher.png $RES/mipmap-$d/ic_launcher_round.png
             cp $RES/mipmap-$d/ic_launcher.png $RES/mipmap-$d/ic_launcher_foreground.png
+            for k in violet forest rose ocean sunset mono; do
+              $IM icon-$k.png -resize ${s}x${s} $RES/mipmap-$d/ic_$k.png
+            done
           done
 
       - name: Add notification permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n <application#' "$MANIFEST"
+          sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application#' "$MANIFEST"
           grep -n "uses-permission" "$MANIFEST"
+
+      - name: Add switchable app icons
+        run: |
+          python3 - <<'PY'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          cat = '<category android:name="android.intent.category.LAUNCHER" />'
+          assert s.count(cat) == 1, 'LAUNCHER category not found exactly once'
+          s = s.replace(cat, '')
+          al = ''
+          for k in ['violet', 'forest', 'rose', 'ocean', 'sunset', 'mono']:
+              en = 'true' if k == 'violet' else 'false'
+              al += (
+                  '\n        <activity-alias android:name=".Icon_' + k + '"'
+                  ' android:targetActivity=".MainActivity"'
+                  ' android:enabled="' + en + '" android:exported="true"'
+                  ' android:icon="@mipmap/ic_' + k + '"'
+                  ' android:roundIcon="@mipmap/ic_' + k + '"'
+                  ' android:label="@string/app_name">\n'
+                  '            <intent-filter>\n'
+                  '                <action android:name="android.intent.action.MAIN" />\n'
+                  '                <category android:name="android.intent.category.LAUNCHER" />\n'
+                  '            </intent-filter>\n'
+                  '        </activity-alias>')
+          assert s.count('</application>') == 1
+          s = s.replace('</application>', al + '\n    </application>')
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
+          D=android/app/src/main/java/com/kartochki/app
+          ls $D
+          cat > $D/IconPlugin.java <<'JAVA'
+          package com.kartochki.app;
+
+          import android.content.ComponentName;
+          import android.content.pm.PackageManager;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "AppIcon")
+          public class IconPlugin extends Plugin {
+              private static final String[] NAMES = {"violet", "forest", "rose", "ocean", "sunset", "mono"};
+
+              @PluginMethod
+              public void setIcon(PluginCall call) {
+                  String name = call.getString("name", "violet");
+                  boolean ok = false;
+                  for (String n : NAMES) if (n.equals(name)) ok = true;
+                  if (!ok) { call.reject("unknown icon"); return; }
+                  PackageManager pm = getContext().getPackageManager();
+                  String pkg = getContext().getPackageName();
+                  ComponentName target = new ComponentName(pkg, "com.kartochki.app.Icon_" + name);
+                  pm.setComponentEnabledSetting(target, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
+                  for (String n : NAMES) {
+                      if (n.equals(name)) continue;
+                      ComponentName other = new ComponentName(pkg, "com.kartochki.app.Icon_" + n);
+                      pm.setComponentEnabledSetting(other, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+                  }
+                  call.resolve(new JSObject());
+              }
+          }
+          JAVA
+          cat > $D/MainActivity.java <<'JAVA'
+          package com.kartochki.app;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(IconPlugin.class);
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          JAVA
+          cat android/app/src/main/AndroidManifest.xml
 
       - name: Sync web files
         run: npx cap sync android
