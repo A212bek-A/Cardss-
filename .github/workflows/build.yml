@@ -159,11 +159,131 @@ jobs:
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   registerPlugin(IconPlugin.class);
+                  registerPlugin(WidgetPlugin.class);
                   super.onCreate(savedInstanceState);
               }
           }
           JAVA
           cat android/app/src/main/AndroidManifest.xml
+
+      - name: Add home screen widget
+        run: |
+          R=android/app/src/main/res
+          D=android/app/src/main/java/com/kartochki/app
+          mkdir -p $R/drawable-nodpi $R/layout $R/xml $R/drawable
+          if [ -f bananchik_widget.png ]; then cp bananchik_widget.png $R/drawable-nodpi/banana_widget.png; else cp icon-violet.png $R/drawable-nodpi/banana_widget.png; fi
+          cat > $R/drawable/widget_bg.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#E61E2A44" />
+              <corners android:radius="22dp" />
+          </shape>
+          XML
+          cat > $R/layout/widget_kartochki.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widget_root"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:orientation="horizontal" android:gravity="center_vertical"
+              android:padding="10dp" android:background="@drawable/widget_bg">
+              <ImageView android:layout_width="56dp" android:layout_height="72dp"
+                  android:src="@drawable/banana_widget" android:scaleType="fitCenter" />
+              <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                  android:layout_weight="1" android:orientation="vertical" android:paddingLeft="10dp">
+                  <TextView android:id="@+id/w_line1" android:layout_width="match_parent"
+                      android:layout_height="wrap_content" android:text="🔥 0"
+                      android:textColor="#FFFFFFFF" android:textSize="22sp" android:textStyle="bold" />
+                  <TextView android:id="@+id/w_line2" android:layout_width="match_parent"
+                      android:layout_height="wrap_content" android:text="✓"
+                      android:textColor="#FFCFD8EE" android:textSize="15sp" />
+              </LinearLayout>
+          </LinearLayout>
+          XML
+          cat > $R/xml/widget_kartochki_info.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="180dp" android:minHeight="70dp"
+              android:targetCellWidth="3" android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_kartochki"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          XML
+          cat > $D/KartWidget.java <<'JAVA'
+          package com.kartochki.app;
+
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.widget.RemoteViews;
+
+          public class KartWidget extends AppWidgetProvider {
+              static void render(Context c, AppWidgetManager m, int[] ids) {
+                  SharedPreferences sp = c.getSharedPreferences("kart_widget", Context.MODE_PRIVATE);
+                  for (int id : ids) {
+                      RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_kartochki);
+                      v.setTextViewText(R.id.w_line1, sp.getString("line1", "🔥 0"));
+                      v.setTextViewText(R.id.w_line2, sp.getString("line2", "✓"));
+                      Intent i = new Intent(c, MainActivity.class);
+                      i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                      PendingIntent pi = PendingIntent.getActivity(c, 0, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                      v.setOnClickPendingIntent(R.id.widget_root, pi);
+                      m.updateAppWidget(id, v);
+                  }
+              }
+              @Override
+              public void onUpdate(Context c, AppWidgetManager m, int[] ids) { render(c, m, ids); }
+              static void refreshAll(Context c) {
+                  AppWidgetManager m = AppWidgetManager.getInstance(c);
+                  int[] ids = m.getAppWidgetIds(new ComponentName(c, KartWidget.class));
+                  if (ids != null && ids.length > 0) render(c, m, ids);
+              }
+          }
+          JAVA
+          cat > $D/WidgetPlugin.java <<'JAVA'
+          package com.kartochki.app;
+
+          import android.content.Context;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "AppWidget")
+          public class WidgetPlugin extends Plugin {
+              @PluginMethod
+              public void update(PluginCall call) {
+                  Context c = getContext();
+                  c.getSharedPreferences("kart_widget", Context.MODE_PRIVATE).edit()
+                      .putString("line1", call.getString("line1", "🔥 0"))
+                      .putString("line2", call.getString("line2", "✓"))
+                      .apply();
+                  KartWidget.refreshAll(c);
+                  call.resolve(new JSObject());
+              }
+          }
+          JAVA
+          python3 - <<'PY'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          rec = (
+              '\n <receiver android:name=".KartWidget" android:exported="true">\n'
+              ' <intent-filter>\n'
+              ' <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+              ' </intent-filter>\n'
+              ' <meta-data android:name="android.appwidget.provider"'
+              ' android:resource="@xml/widget_kartochki_info" />\n'
+              ' </receiver>')
+          assert s.count('</application>') == 1
+          s = s.replace('</application>', rec + '\n </application>')
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
+          grep -n "receiver" android/app/src/main/AndroidManifest.xml
 
       - name: Sync web files
         run: npx cap sync android
